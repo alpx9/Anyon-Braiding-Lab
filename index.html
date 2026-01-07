@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>İleri Seviye Anyon Braiding Lab</title>
+    <style>
+        :root {
+            --bg: #020617;
+            --panel: #1e293b;
+            --accent: #38bdf8;
+            --p1: #fb7185;
+            --p2: #34d399;
+            --p3: #818cf8;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: #f1f5f9;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sol Panel - Kontrol ve Bilgi */
+        .sidebar {
+            width: 350px;
+            background: var(--panel);
+            padding: 20px;
+            border-right: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            z-index: 10;
+        }
+
+        /* Sağ Alan - Görselleştirme */
+        .main-content {
+            flex: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        canvas { width: 100%; height: 100%; cursor: crosshair; }
+
+        .status-badge {
+            background: #0f172a;
+            padding: 10px;
+            border-radius: 8px;
+            border-left: 4px solid var(--accent);
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .gate-display {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent);
+            text-align: center;
+            padding: 20px;
+            background: rgba(56, 189, 248, 0.1);
+            border-radius: 12px;
+        }
+
+        .label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+
+        .tooltip {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 300px;
+            font-size: 0.85rem;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h2>Quantum Lab v2</h2>
+    <p style="font-size: 0.9rem; color: #cbd5e1;">Anyonları birbirinin etrafından geçirerek "Kuantum Örgüsü" oluşturun.</p>
+    
+    <div class="label">Aktif Kuantum Kapısı</div>
+    <div id="gateName" class="gate-display">IDLE (BEKLEMEDE)</div>
+
+    <div class="label">Sistem Durumu</div>
+    <div class="status-badge">
+        Hata Bağışıklığı: %100 <br>
+        Topolojik Koruma: AKTİF <br>
+        Düğüm Karmaşıklığı: <span id="complexity">0</span>
+    </div>
+
+    <div class="label">Braiding Geçmişi</div>
+    <div id="history" style="font-family: monospace; font-size: 0.8rem; color: #94a3b8; height: 100px; overflow-y: auto;">
+        Sistem hazır...
+    </div>
+
+    <button onclick="resetLab()" style="background: var(--accent); border:none; padding:10px; border-radius:5px; font-weight:bold; cursor:pointer; margin-top:auto;">Sistemi Sıfırla</button>
+</div>
+
+<div class="main-content">
+    <div class="tooltip">
+        <strong>Nasıl Kullanılır?</strong><br>
+        1. Renkli parçacıkları sürükleyin.<br>
+        2. Bir parçacığı diğerinin etrafında tam tur döndürün.<br>
+        3. Alttaki <strong>Zaman Akışı (Braid)</strong> grafiğinde örgülerin nasıl oluştuğunu izleyin.
+    </div>
+    <canvas id="labCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('labCanvas');
+    const ctx = canvas.getContext('2d');
+    const gateNameEl = document.getElementById('gateName');
+    const complexityEl = document.getElementById('complexity');
+    const historyEl = document.getElementById('history');
+
+    let particles = [
+        { x: 0, y: 0, color: '#fb7185', id: '1', trail: [] },
+        { x: 0, y: 0, color: '#34d399', id: '2', trail: [] },
+        { x: 0, y: 0, color: '#818cf8', id: '3', trail: [] }
+    ];
+
+    let draggingIdx = -1;
+    let braidData = []; // Zaman içindeki hareket kaydı
+    let time = 0;
+
+    function init() {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        
+        // Parçacıkları yatay diz
+        const spacing = canvas.width / 4;
+        particles.forEach((p, i) => {
+            p.x = spacing * (i + 1);
+            p.y = canvas.height * 0.3;
+        });
+        render();
+    }
+
+    function resetLab() {
+        braidData = [];
+        time = 0;
+        complexityEl.innerText = "0";
+        gateNameEl.innerText = "IDLE";
+        historyEl.innerHTML = "Sistem sıfırlandı...";
+        init();
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        particles.forEach((p, i) => {
+            if (Math.hypot(p.x - mx, p.y - my) < 30) draggingIdx = i;
+        });
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (draggingIdx === -1) return;
+        const rect = canvas.getBoundingClientRect();
+        particles[draggingIdx].x = e.clientX - rect.left;
+        particles[draggingIdx].y = e.clientY - rect.top;
+        
+        checkInteractions();
+        render();
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (draggingIdx !== -1) {
+            logAction(`Parçacık ${particles[draggingIdx].id} hareket ettirildi.`);
+        }
+        draggingIdx = -1;
+    });
+
+    function checkInteractions() {
+        time++;
+        // Her 5 karede bir zaman akışına veri ekle
+        if (time % 2 === 0) {
+            braidData.push(particles.map(p => ({x: p.x, y: p.y})));
+            if (braidData.length > 200) braidData.shift();
+        }
+
+        // Basit bir kapı algılama mantığı (Örnek: P1 ve P2 yer değiştirdi mi?)
+        const dist12 = Math.hypot(particles[0].x - particles[1].x, particles[0].y - particles[1].y);
+        if (dist12 < 40) {
+            gateNameEl.innerText = "HADAMARD GATE";
+            complexityEl.innerText = parseInt(complexityEl.innerText) + 1;
+        }
+    }
+
+    function logAction(msg) {
+        const div = document.createElement('div');
+        div.innerText = `> ${msg}`;
+        historyEl.prepend(div);
+    }
+
+    function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. Zaman Akışı (Braid/Örgü Görselleştirmesi)
+        // Bu bölüm, parçacıkların geçmişteki konumlarını "aşağı doğru" bir iplik gibi çizer
+        for (let i = 0; i < particles.length; i++) {
+            ctx.beginPath();
+            ctx.strokeStyle = particles[i].color;
+            ctx.lineWidth = 3;
+            ctx.globalAlpha = 0.5;
+
+            for (let j = 1; j < braidData.length; j++) {
+                const prev = braidData[j-1][i];
+                const curr = braidData[j][i];
+                // Y eksenini zaman olarak kullan: Geçmişi aşağı kaydır
+                const yOffset = (braidData.length - j) * 3; 
+                ctx.moveTo(prev.x, canvas.height * 0.4 + yOffset);
+                ctx.lineTo(curr.x, canvas.height * 0.4 + yOffset + 3);
+            }
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+        }
+
+        // 2. İşlem Odası (Üst Bölüm) Çizgisi
+        ctx.setLineDash([10, 10]);
+        ctx.strokeStyle = '#334155';
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height * 0.38);
+        ctx.lineTo(canvas.width, canvas.height * 0.38);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // 3. Parçacıklar
+        particles.forEach(p => {
+            // Parlama
+            const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 30);
+            grad.addColorStop(0, p.color);
+            grad.addColorStop(1, 'transparent');
+            ctx.fillStyle = grad;
+            ctx.globalAlpha = 0.3;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 30, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+
+            // Çekirdek
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.fillText(p.id, p.x - 4, p.y + 4);
+        });
+
+        requestAnimationFrame(render);
+    }
+
+    window.onload = init;
+    window.onresize = init;
+</script>
+</body>
+</html>
